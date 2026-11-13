@@ -5,6 +5,8 @@
 #include <gtk/gtk.h>
 #include <libxfce4panel/libxfce4panel.h>
 
+#define HIST_LEN 8
+
 typedef enum {
     METRIC_CPU = 0,
     METRIC_RAM,
@@ -51,6 +53,17 @@ typedef struct {
 } MetricSlot;
 
 typedef struct {
+    unsigned long long idle;
+    unsigned long long total;
+} CpuSample;
+
+typedef struct {
+    gint64 t_us;
+    unsigned long long rx;
+    unsigned long long tx;
+} NetSample;
+
+typedef struct {
     XfcePanelPlugin *plugin;
     GtkCssProvider *css;
 
@@ -86,12 +99,14 @@ typedef struct {
     int fd_route;
     int fd_net_dev;
 
-    /* Metric sampling state */
-    unsigned long long prev_cpu_idle;
-    unsigned long long prev_cpu_total;
-    unsigned long long prev_net_rx;
-    unsigned long long prev_net_tx;
-    gint64 prev_net_time_us;
+    /* Sliding-window sampling state */
+    CpuSample cpu_hist[HIST_LEN];
+    int cpu_hist_len;
+    int cpu_hist_idx;
+
+    NetSample net_hist[HIST_LEN];
+    int net_hist_len;
+    int net_hist_idx;
     char cached_auto_iface[64];
     char prev_iface[64];
 

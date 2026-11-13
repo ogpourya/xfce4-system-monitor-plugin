@@ -168,9 +168,11 @@ void sysmon_apply_css(SysMon *m) {
             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
     GString *s = g_string_sized_new(256);
+    int val_w = (m->font_size * 34 + 9) / 10;
+    int net_w = (m->font_size * 72 + 9) / 10;
     g_string_append(s, ".sysmon-box { padding: 1px 5px; }\n");
-    g_string_append_printf(s, ".sysmon-val { font-size: %dpx; font-weight: bold; min-width: 32px; }\n", m->font_size);
-    g_string_append_printf(s, ".sysmon-net { font-size: %dpx; font-weight: bold; }\n", m->font_size);
+    g_string_append_printf(s, ".sysmon-val { font-size: %dpx; font-weight: bold; font-variant-numeric: tabular-nums; min-width: %dpx; }\n", m->font_size, val_w);
+    g_string_append_printf(s, ".sysmon-net { font-size: %dpx; font-weight: bold; font-variant-numeric: tabular-nums; min-width: %dpx; }\n", m->font_size, net_w);
     if (m->dot_color && *m->dot_color)
         g_string_append_printf(s, ".sysmon-dot { font-size: %dpx; color: %s; }\n", MAX(7, m->font_size - 1), m->dot_color);
     else
@@ -207,6 +209,7 @@ static gboolean effective_show(const SysMon *m, int idx) {
 
 static GtkWidget *make_label(const char *text, const char *c1, const char *c2) {
     GtkWidget *lbl = gtk_label_new(text);
+    gtk_label_set_xalign(GTK_LABEL(lbl), 0.0f);
     GtkStyleContext *sc = gtk_widget_get_style_context(lbl);
     if (c1) gtk_style_context_add_class(sc, c1);
     if (c2) gtk_style_context_add_class(sc, c2);

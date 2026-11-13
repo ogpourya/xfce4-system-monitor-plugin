@@ -49,6 +49,11 @@ static inline void format_speed(double bps, char *out, size_t len) {
     else g_snprintf(out, len, "%.1f %s", v, units[i]);
 }
 
+static int window_samples(int interval_ms) {
+    int win = 1000 / MAX(1, interval_ms);
+    return CLAMP(win, 1, HIST_LEN - 1);
+}
+
 static void read_cpu(SysMon *m) {
     char buf[256];
     if (pread_all(m->fd_stat, buf, sizeof(buf)) <= 0) return;
@@ -60,21 +65,24 @@ static void read_cpu(SysMon *m) {
 
     unsigned long long total = user + nice + sys + idle + iow + irq + sirq + steal;
     unsigned long long idle_total = idle + iow;
-    if (m->prev_cpu_total == 0) {
-        m->prev_cpu_idle = idle_total;
-        m->prev_cpu_total = total;
-        return;
+
+    m->cpu_hist[m->cpu_hist_idx] = (CpuSample){ .idle = idle_total, .total = total };
+    if (m->cpu_hist_len < HIST_LEN) m->cpu_hist_len++;
+
+    int back = MIN(window_samples(m->interval_ms), m->cpu_hist_len - 1);
+    if (back >= 1) {
+        int old_idx = (m->cpu_hist_idx - back + HIST_LEN) % HIST_LEN;
+        CpuSample old = m->cpu_hist[old_idx];
+        unsigned long long dt = total >= old.total ? total - old.total : 0;
+        unsigned long long di = idle_total >= old.idle ? idle_total - old.idle : 0;
+        if (dt > 0 && dt >= di) {
+            unsigned long long busy = dt - di;
+            m->metrics[METRIC_CPU].pct = (int)((busy * 100ULL + dt / 2ULL) / dt);
+        } else {
+            m->metrics[METRIC_CPU].pct = 0;
+        }
     }
-    unsigned long long dt = total - m->prev_cpu_total;
-    unsigned long long di = idle_total - m->prev_cpu_idle;
-    m->prev_cpu_idle = idle_total;
-    m->prev_cpu_total = total;
-    if (dt > 0 && dt >= di) {
-        unsigned long long busy = dt - di;
-        m->metrics[METRIC_CPU].pct = (int)((busy * 100ULL + dt / 2ULL) / dt);
-    } else {
-        m->metrics[METRIC_CPU].pct = 0;
-    }
+    m->cpu_hist_idx = (m->cpu_hist_idx + 1) % HIST_LEN;
 }
 
 static void read_ram(SysMon *m) {
@@ -164,7 +172,7 @@ static void read_net(SysMon *m, gboolean refresh_route) {
 
     unsigned long long rx = 0, tx = 0;
     char *p = strchr(buf, '\n');
-    if (p) p = strchr(p + 1, '\n'); /* skip 2 header lines */
+    if (p) p = strchr(p + 1, '\n');
     while (p && *++p) {
         char *eol = strchr(p, '\n');
         if (eol) *eol = '\0';
@@ -188,22 +196,31 @@ static void read_net(SysMon *m, gboolean refresh_route) {
 
     const char *key = filter_one ? want : "__ALL__";
     gint64 now = g_get_monotonic_time();
-    if (strcmp(m->prev_iface, key) != 0 || m->prev_net_time_us == 0) {
+    if (strcmp(m->prev_iface, key) != 0) {
         g_strlcpy(m->prev_iface, key, sizeof(m->prev_iface));
-        m->prev_net_rx = rx;
-        m->prev_net_tx = tx;
-        m->prev_net_time_us = now;
+        m->net_hist_len = 0;
+        m->net_hist_idx = 0;
+    }
+
+    m->net_hist[m->net_hist_idx] = (NetSample){ .t_us = now, .rx = rx, .tx = tx };
+    if (m->net_hist_len < HIST_LEN) m->net_hist_len++;
+
+    int back = MIN(window_samples(m->interval_ms), m->net_hist_len - 1);
+    if (back < 1) {
+        m->net_hist_idx = (m->net_hist_idx + 1) % HIST_LEN;
         g_strlcpy(m->net_rx_text, "▼ 0 B/s", sizeof(m->net_rx_text));
         g_strlcpy(m->net_tx_text, "▲ 0 B/s", sizeof(m->net_tx_text));
         return;
     }
-    double dt = (double)(now - m->prev_net_time_us) * 1e-6;
+
+    int old_idx = (m->net_hist_idx - back + HIST_LEN) % HIST_LEN;
+    NetSample old = m->net_hist[old_idx];
+    m->net_hist_idx = (m->net_hist_idx + 1) % HIST_LEN;
+
+    double dt = (double)(now - old.t_us) * 1e-6;
     if (dt < 0.05) return;
-    double rx_spd = rx >= m->prev_net_rx ? (double)(rx - m->prev_net_rx) / dt : 0.0;
-    double tx_spd = tx >= m->prev_net_tx ? (double)(tx - m->prev_net_tx) / dt : 0.0;
-    m->prev_net_rx = rx;
-    m->prev_net_tx = tx;
-    m->prev_net_time_us = now;
+    double rx_spd = rx >= old.rx ? (double)(rx - old.rx) / dt : 0.0;
+    double tx_spd = tx >= old.tx ? (double)(tx - old.tx) / dt : 0.0;
 
     char rx_s[16], tx_s[16];
     format_speed(rx_spd, rx_s, sizeof(rx_s));

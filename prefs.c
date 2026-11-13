@@ -67,7 +67,8 @@ static void on_prefs_changed(GtkWidget *w, gpointer user_data) {
             g_free(m->net_iface);
             m->net_iface = g_steal_pointer(&new_if);
             m->cached_auto_iface[0] = '\0';
-            m->prev_net_time_us = 0;
+            m->net_hist_len = 0;
+            m->net_hist_idx = 0;
         }
     }
 
