@@ -168,15 +168,18 @@ void sysmon_apply_css(SysMon *m) {
             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
     GString *s = g_string_sized_new(256);
-    int val_w = (m->font_size * 28 + 9) / 10;
-    int net_w = (m->font_size * 55 + 9) / 10;
-    g_string_append(s, ".sysmon-box { padding: 1px 5px; }\n");
+    int val_w = (m->font_size * 26 + 9) / 10;
+    int net_w = (m->font_size * 48 + 9) / 10;
+    g_string_append(s, ".sysmon-box { padding: 1px 6px; }\n");
     g_string_append_printf(s, ".sysmon-val { font-size: %dpx; font-weight: bold; font-variant-numeric: tabular-nums; min-width: %dpx; }\n", m->font_size, val_w);
     g_string_append_printf(s, ".sysmon-net { font-size: %dpx; font-weight: bold; font-variant-numeric: tabular-nums; min-width: %dpx; }\n", m->font_size, net_w);
-    if (m->dot_color && *m->dot_color)
-        g_string_append_printf(s, ".sysmon-dot { font-size: %dpx; color: %s; }\n", MAX(7, m->font_size - 1), m->dot_color);
-    else
-        g_string_append_printf(s, ".sysmon-dot { font-size: %dpx; }\n", MAX(7, m->font_size - 1));
+    if (m->dot_color && *m->dot_color) {
+        g_string_append_printf(s, ".sysmon-dot { font-size: %dpx; font-weight: bold; margin: 0 6px; color: %s; }\n", m->font_size, m->dot_color);
+        g_string_append_printf(s, ".sysmon-sep { font-size: %dpx; margin: 0 5px; color: %s; }\n", m->font_size, m->dot_color);
+    } else {
+        g_string_append_printf(s, ".sysmon-dot { font-size: %dpx; font-weight: bold; margin: 0 6px; }\n", m->font_size);
+        g_string_append_printf(s, ".sysmon-sep { font-size: %dpx; margin: 0 5px; }\n", m->font_size);
+    }
 
     for (int i = 0; i < METRIC_COUNT; i++) {
         if (METRIC_META[i].css_class && m->metrics[i].color && *m->metrics[i].color)
@@ -209,7 +212,7 @@ static gboolean effective_show(const SysMon *m, int idx) {
 
 static GtkWidget *make_label(const char *text, const char *c1, const char *c2) {
     GtkWidget *lbl = gtk_label_new(text);
-    gtk_label_set_xalign(GTK_LABEL(lbl), 0.0f);
+    gtk_label_set_xalign(GTK_LABEL(lbl), 0.5f);
     GtkStyleContext *sc = gtk_widget_get_style_context(lbl);
     if (c1) gtk_style_context_add_class(sc, c1);
     if (c2) gtk_style_context_add_class(sc, c2);
@@ -274,19 +277,16 @@ void sysmon_rebuild_ui(SysMon *m) {
     for (int i = 0; i < METRIC_COUNT; i++) {
         if (!effective_show(m, i)) continue;
         if (any)
-            gtk_box_pack_start(GTK_BOX(m->box), make_label(" · ", "sysmon-dot", NULL), FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(m->box), make_label("·", "sysmon-dot", NULL), FALSE, FALSE, 0);
 
         if (i == METRIC_NET) {
             GtkWidget *nb = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-            gtk_widget_set_margin_start(nb, 2);
-            gtk_widget_set_margin_end(nb, 2);
             g_strlcpy(m->disp_net_rx, m->net_rx_text, sizeof(m->disp_net_rx));
             g_strlcpy(m->disp_net_tx, m->net_tx_text, sizeof(m->disp_net_tx));
             m->net_rx_label = make_label(m->net_rx_text, "sysmon-net", "sysmon-net-rx");
-            gtk_label_set_xalign(GTK_LABEL(m->net_rx_label), 1.0f);
             m->net_tx_label = make_label(m->net_tx_text, "sysmon-net", "sysmon-net-tx");
             gtk_box_pack_start(GTK_BOX(nb), m->net_rx_label, FALSE, FALSE, 0);
-            gtk_box_pack_start(GTK_BOX(nb), make_label(" │ ", "sysmon-dot", NULL), FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(nb), make_label("│", "sysmon-sep", NULL), FALSE, FALSE, 0);
             gtk_box_pack_start(GTK_BOX(nb), m->net_tx_label, FALSE, FALSE, 0);
             gtk_box_pack_start(GTK_BOX(m->box), nb, FALSE, FALSE, 0);
         } else {
