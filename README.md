@@ -4,7 +4,7 @@ Lightweight single-row XFCE 4 panel plugin showing **CPU**, **RAM**, **Network**
 
 ## Features
 
-- **Click to cycle views**: Left-click the widget to progressively reveal metrics (`CPU` → `+RAM` → `+Network` → `+Disk`), saved across sessions.
+- **Click to launch task manager**: Left-click the widget to open `xfce4-taskmanager` (configurable in Properties).
 - **Low-overhead polling**: Pre-opened `/proc` file descriptors with `pread()` and dirty-checked GTK label updates (`250 ms` default interval).
 - **Theme-tinted symbolic icons**: Built-in crisp `16x16` symbolic SVGs automatically tinted to your panel foreground color, or any GTK icon name.
 - **Live preferences**: Right-click → **Properties** to toggle metrics, pick network interface (`auto`, `all`, or specific NIC), set mount path, adjust update interval (`100–10000 ms`), font/icon sizes, and custom colors.

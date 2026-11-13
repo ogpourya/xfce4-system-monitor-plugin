@@ -1,7 +1,7 @@
 [Xfce Panel]
 Type=X-XFCE-PanelPlugin
 Name=System Monitor
-Comment=Single-row system monitor: CPU, RAM, Network, Disk. Click to cycle views.
+Comment=Single-row system monitor: CPU, RAM, Network, Disk. Click to open task manager.
 Icon=utilities-system-monitor
 X-XFCE-Module=system-monitor
 X-XFCE-Internal=FALSE

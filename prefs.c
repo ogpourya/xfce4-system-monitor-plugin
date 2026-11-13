@@ -6,7 +6,8 @@
 typedef struct {
     SysMon *m;
     GtkWidget *cb_metric[METRIC_COUNT];
-    GtkWidget *cb_icons, *cb_cycle;
+    GtkWidget *cb_icons;
+    GtkWidget *entry_taskmgr;
     GtkWidget *combo_iface, *entry_disk;
     GtkWidget *spin_interval, *spin_icon, *spin_font;
     GtkWidget *entry_icon[METRIC_COUNT];
@@ -52,10 +53,9 @@ static void on_prefs_changed(GtkWidget *w, gpointer user_data) {
     }
 
     m->show_icons = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ui->cb_icons));
-    m->click_to_cycle = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ui->cb_cycle));
 
-    int n = sysmon_enabled_count(m);
-    if (n > 0 && m->cycle_state >= n) m->cycle_state = n - 1;
+    g_free(m->task_manager_cmd);
+    m->task_manager_cmd = g_strdup(gtk_entry_get_text(GTK_ENTRY(ui->entry_taskmgr)));
 
     g_autofree gchar *iface = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(ui->combo_iface));
     if (iface) {
@@ -204,13 +204,9 @@ void prefs_open_dialog(XfcePanelPlugin *plugin, gpointer user_data) {
     }
 
     ui->cb_icons = gtk_check_button_new_with_label("Show Icons");
-    ui->cb_cycle = gtk_check_button_new_with_label("Left-click cycles views");
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ui->cb_icons), m->show_icons);
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ui->cb_cycle), m->click_to_cycle);
     gtk_grid_attach(GTK_GRID(g1), ui->cb_icons, 0, 2, 1, 1);
-    gtk_grid_attach(GTK_GRID(g1), ui->cb_cycle, 1, 2, 1, 1);
     g_signal_connect(ui->cb_icons, "toggled", G_CALLBACK(on_prefs_changed), ui);
-    g_signal_connect(ui->cb_cycle, "toggled", G_CALLBACK(on_prefs_changed), ui);
 
     GtkWidget *lbl_if = gtk_label_new("Network interface:");
     gtk_widget_set_halign(lbl_if, GTK_ALIGN_START);
@@ -235,6 +231,14 @@ void prefs_open_dialog(XfcePanelPlugin *plugin, gpointer user_data) {
     gtk_grid_attach(GTK_GRID(g1), lbl_iv, 0, 5, 1, 1);
     gtk_grid_attach(GTK_GRID(g1), ui->spin_interval, 1, 5, 1, 1);
     g_signal_connect(ui->spin_interval, "value-changed", G_CALLBACK(on_prefs_changed), ui);
+
+    GtkWidget *lbl_tm = gtk_label_new("Task manager command:");
+    gtk_widget_set_halign(lbl_tm, GTK_ALIGN_START);
+    ui->entry_taskmgr = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(ui->entry_taskmgr), m->task_manager_cmd);
+    gtk_grid_attach(GTK_GRID(g1), lbl_tm, 0, 6, 1, 1);
+    gtk_grid_attach(GTK_GRID(g1), ui->entry_taskmgr, 1, 6, 1, 1);
+    g_signal_connect(ui->entry_taskmgr, "changed", G_CALLBACK(on_prefs_changed), ui);
 
     gtk_notebook_append_page(GTK_NOTEBOOK(nb), g1, gtk_label_new("General"));
 

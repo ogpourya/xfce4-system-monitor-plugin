@@ -58,8 +58,7 @@ static void load_config(SysMon *m) {
             sysmon_parse_icon_spec(&m->metrics[i].icon, METRIC_META[i].default_icon, (BuiltinIcon)i);
     }
     m->show_icons = TRUE;
-    m->click_to_cycle = TRUE;
-    m->cycle_state = 3;
+    m->task_manager_cmd = g_strdup("xfce4-taskmanager");
     m->net_iface = g_strdup("auto");
     m->disk_path = g_strdup("/");
     m->interval_ms = 250;
@@ -88,12 +87,13 @@ static void load_config(SysMon *m) {
     }
 
     m->show_icons = xfce_rc_read_bool_entry(rc, "show_icons", TRUE);
-    m->click_to_cycle = xfce_rc_read_bool_entry(rc, "click_to_cycle", TRUE);
-    m->cycle_state = CLAMP(xfce_rc_read_int_entry(rc, "cycle_state", 3), 0, 3);
+    g_free(m->task_manager_cmd);
+    m->task_manager_cmd = g_strdup(xfce_rc_read_entry(rc, "task_manager_cmd", "xfce4-taskmanager"));
 
     g_free(m->net_iface);
     m->net_iface = g_strdup(xfce_rc_read_entry(rc, "net_iface", "auto"));
     g_free(m->disk_path);
+    g_free(m->task_manager_cmd);
     m->disk_path = g_strdup(xfce_rc_read_entry(rc, "disk_path", "/"));
 
     m->interval_ms = CLAMP(xfce_rc_read_int_entry(rc, "interval_ms", 250), 100, 10000);
@@ -123,8 +123,7 @@ static void save_config_now(SysMon *m) {
     }
 
     xfce_rc_write_bool_entry(rc, "show_icons", m->show_icons);
-    xfce_rc_write_bool_entry(rc, "click_to_cycle", m->click_to_cycle);
-    xfce_rc_write_int_entry(rc, "cycle_state", m->cycle_state);
+    xfce_rc_write_entry(rc, "task_manager_cmd", m->task_manager_cmd ? m->task_manager_cmd : "");
 
     xfce_rc_write_entry(rc, "net_iface", m->net_iface);
     xfce_rc_write_entry(rc, "disk_path", m->disk_path);
@@ -194,21 +193,7 @@ void sysmon_apply_css(SysMon *m) {
     g_string_free(s, TRUE);
 }
 
-int sysmon_enabled_count(const SysMon *m) {
-    int count = 0;
-    for (int i = 0; i < METRIC_COUNT; i++)
-        if (m->metrics[i].enabled) count++;
-    return count;
-}
 
-static gboolean effective_show(const SysMon *m, int idx) {
-    if (!m->metrics[idx].enabled) return FALSE;
-    if (!m->click_to_cycle) return TRUE;
-    int rank = 0;
-    for (int i = 0; i < idx; i++)
-        if (m->metrics[i].enabled) rank++;
-    return rank <= m->cycle_state;
-}
 
 static GtkWidget *make_label(const char *text, const char *c1, const char *c2) {
     GtkWidget *lbl = gtk_label_new(text);
@@ -275,7 +260,7 @@ void sysmon_rebuild_ui(SysMon *m) {
     char buf[16];
 
     for (int i = 0; i < METRIC_COUNT; i++) {
-        if (!effective_show(m, i)) continue;
+        if (!m->metrics[i].enabled) continue;
         if (any)
             gtk_box_pack_start(GTK_BOX(m->box), make_label("·", "sysmon-dot", NULL), FALSE, FALSE, 0);
 
@@ -313,12 +298,13 @@ void sysmon_restart_timer(SysMon *m) {
 static gboolean on_button_press(GtkWidget *w, GdkEventButton *ev, gpointer user_data) {
     (void)w;
     SysMon *m = user_data;
-    if (ev->type == GDK_BUTTON_PRESS && ev->button == 1 && m->click_to_cycle) {
-        int n = sysmon_enabled_count(m);
-        if (n > 1) {
-            m->cycle_state = (m->cycle_state + 1) % n;
-            sysmon_rebuild_ui(m);
-            save_config_now(m);
+    if (ev->type == GDK_BUTTON_PRESS && ev->button == 1) {
+        if (m->task_manager_cmd && *m->task_manager_cmd) {
+            GError *err = NULL;
+            if (!g_spawn_command_line_async(m->task_manager_cmd, &err)) {
+                g_warning("system-monitor: failed to launch '%s': %s", m->task_manager_cmd, err->message);
+                g_error_free(err);
+            }
         }
         return TRUE;
     }

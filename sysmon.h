@@ -70,8 +70,7 @@ typedef struct {
     /* Configuration */
     MetricSlot metrics[METRIC_COUNT];
     gboolean show_icons;
-    gboolean click_to_cycle;
-    int cycle_state;
+    gchar *task_manager_cmd;
 
     gchar *net_iface;       /* "auto", "all", or interface name */
     gchar *disk_path;       /* default "/" */
@@ -125,7 +124,6 @@ void sysmon_rebuild_ui(SysMon *m);
 void sysmon_restart_timer(SysMon *m);
 void sysmon_schedule_save(SysMon *m);
 void sysmon_flush_save(SysMon *m);
-int  sysmon_enabled_count(const SysMon *m);
 
 /* Metrics polling (metrics.c) */
 void     metrics_init_fds(SysMon *m);
