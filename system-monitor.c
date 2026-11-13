@@ -93,7 +93,6 @@ static void load_config(SysMon *m) {
     g_free(m->net_iface);
     m->net_iface = g_strdup(xfce_rc_read_entry(rc, "net_iface", "auto"));
     g_free(m->disk_path);
-    g_free(m->task_manager_cmd);
     m->disk_path = g_strdup(xfce_rc_read_entry(rc, "disk_path", "/"));
 
     m->interval_ms = CLAMP(xfce_rc_read_int_entry(rc, "interval_ms", 250), 100, 10000);
@@ -350,6 +349,7 @@ static void on_free_data(XfcePanelPlugin *plugin, gpointer user_data) {
         g_free(m->metrics[i].icon.name);
         g_free(m->metrics[i].color);
     }
+    g_free(m->task_manager_cmd);
     g_free(m->net_iface);
     g_free(m->disk_path);
     g_free(m->net_rx_color);
