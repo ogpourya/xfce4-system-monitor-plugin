@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "sysmon.h"
 #include <fcntl.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/statvfs.h>
@@ -35,6 +34,16 @@ void metrics_close_fds(SysMon *m) {
     close_fd(&m->fd_net_dev);
 }
 
+static inline const char *skip_ws(const char *p) {
+    while (*p == ' ' || *p == '\t') p++;
+    return p;
+}
+
+static inline const char *skip_tok(const char *p) {
+    while (*p && *p != ' ' && *p != '\t' && *p != '\n') p++;
+    return p;
+}
+
 static inline void format_speed(double bps, char *out, size_t len) {
     if (bps < 1000.0) {
         g_snprintf(out, len, "%d B/s", (int)bps);
@@ -49,22 +58,30 @@ static inline void format_speed(double bps, char *out, size_t len) {
     else g_snprintf(out, len, "%.1f %s", v, units[i]);
 }
 
-static int window_samples(int interval_ms) {
+static inline int window_samples(int interval_ms) {
     int win = 1000 / MAX(1, interval_ms);
     return CLAMP(win, 1, HIST_LEN - 1);
 }
 
 static void read_cpu(SysMon *m) {
-    char buf[256];
-    if (pread_all(m->fd_stat, buf, sizeof(buf)) <= 0) return;
+    if (pread_all(m->fd_stat, m->io_buf, 256) <= 0) return;
+    if (strncmp(m->io_buf, "cpu ", 4) != 0) return;
 
-    unsigned long long user = 0, nice = 0, sys = 0, idle = 0, iow = 0, irq = 0, sirq = 0, steal = 0;
-    if (sscanf(buf, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
-               &user, &nice, &sys, &idle, &iow, &irq, &sirq, &steal) < 7)
-        return;
+    const char *p = m->io_buf + 4;
+    char *end = NULL;
+    unsigned long long vals[8] = {0};
+    int count = 0;
+    while (count < 8) {
+        p = skip_ws(p);
+        if (*p < '0' || *p > '9') break;
+        vals[count++] = strtoull(p, &end, 10);
+        p = end;
+    }
+    if (count < 7) return;
 
-    unsigned long long total = user + nice + sys + idle + iow + irq + sirq + steal;
-    unsigned long long idle_total = idle + iow;
+    unsigned long long total = 0;
+    for (int i = 0; i < count; i++) total += vals[i];
+    unsigned long long idle_total = vals[3] + vals[4]; /* idle + iowait */
 
     m->cpu_hist[m->cpu_hist_idx] = (CpuSample){ .idle = idle_total, .total = total };
     if (m->cpu_hist_len < HIST_LEN) m->cpu_hist_len++;
@@ -86,17 +103,16 @@ static void read_cpu(SysMon *m) {
 }
 
 static void read_ram(SysMon *m) {
-    char buf[512];
-    if (pread_all(m->fd_meminfo, buf, sizeof(buf)) <= 0) return;
+    if (pread_all(m->fd_meminfo, m->io_buf, 512) <= 0) return;
 
     unsigned long long total = 0, avail = 0;
-    char *p = buf;
+    const char *p = m->io_buf;
     while (*p && (!total || !avail)) {
         if (strncmp(p, "MemTotal:", 9) == 0)
             total = strtoull(p + 9, NULL, 10);
         else if (strncmp(p, "MemAvailable:", 13) == 0)
             avail = strtoull(p + 13, NULL, 10);
-        char *nl = strchr(p, '\n');
+        const char *nl = strchr(p, '\n');
         if (!nl) break;
         p = nl + 1;
     }
@@ -108,41 +124,58 @@ static void read_ram(SysMon *m) {
 
 static gboolean is_virtual_iface(const char *name) {
     if (strcmp(name, "lo") == 0) return TRUE;
-    static const char *const prefixes[] = {
-        "tun", "tap", "wg", "tailscale", "zt", "virbr", "docker", "br-", "veth", "waydroid", "happ-", NULL
+    static const struct { const char *p; size_t len; } prefixes[] = {
+        {"tun", 3}, {"tap", 3}, {"wg", 2}, {"tailscale", 9}, {"zt", 2},
+        {"virbr", 5}, {"docker", 6}, {"br-", 3}, {"veth", 4}, {"waydroid", 8}, {"happ-", 5}
     };
-    for (int i = 0; prefixes[i]; i++)
-        if (g_str_has_prefix(name, prefixes[i])) return TRUE;
+    for (size_t i = 0; i < G_N_ELEMENTS(prefixes); i++)
+        if (strncmp(name, prefixes[i].p, prefixes[i].len) == 0) return TRUE;
+
     char dev_path[128];
     g_snprintf(dev_path, sizeof(dev_path), "/sys/class/net/%s/device", name);
     return access(dev_path, F_OK) != 0;
 }
 
 gboolean metrics_active_iface(SysMon *m, char *out, size_t len) {
-    char buf[2048];
-    if (pread_all(m->fd_route, buf, sizeof(buf)) <= 0) return FALSE;
+    if (pread_all(m->fd_route, m->io_buf, sizeof(m->io_buf)) <= 0) return FALSE;
 
-    int metric = 0;
     int best_phys_metric = 1 << 30, best_any_metric = 1 << 30;
     char best_phys[64] = {0}, best_any[64] = {0};
 
-    char *p = strchr(buf, '\n');
+    const char *p = strchr(m->io_buf, '\n');
     while (p && *++p) {
-        char iface[64], dest[32];
-        unsigned int flags = 0;
-        if (sscanf(p, "%63s %31s %*31s %x %*u %*u %d", iface, dest, &flags, &metric) == 4) {
-            if (strcmp(dest, "00000000") == 0 && (flags & 0x1)) {
-                if (!is_virtual_iface(iface) && metric < best_phys_metric) {
-                    best_phys_metric = metric;
-                    g_strlcpy(best_phys, iface, sizeof(best_phys));
-                }
-                if (metric < best_any_metric) {
-                    best_any_metric = metric;
-                    g_strlcpy(best_any, iface, sizeof(best_any));
+        const char *eol = strchr(p, '\n');
+        const char *s = skip_ws(p);
+        const char *e = skip_tok(s);
+        size_t ilen = (size_t)(e - s);
+        if (ilen > 0 && ilen < sizeof(best_phys)) {
+            char iface[64];
+            memcpy(iface, s, ilen);
+            iface[ilen] = '\0';
+
+            s = skip_ws(e); e = skip_tok(s); /* Destination */
+            if ((size_t)(e - s) == 8 && memcmp(s, "00000000", 8) == 0) {
+                s = skip_ws(e); e = skip_tok(s); /* Gateway */
+                s = skip_ws(e);
+                char *end = NULL;
+                unsigned long flags = strtoul(s, &end, 16);
+                if ((flags & 0x1UL) && end != s) {
+                    s = skip_ws(end); s = skip_tok(s); /* RefCnt */
+                    s = skip_ws(s);   s = skip_tok(s); /* Use */
+                    s = skip_ws(s);
+                    int metric = (int)strtol(s, NULL, 10);
+                    if (!is_virtual_iface(iface) && metric < best_phys_metric) {
+                        best_phys_metric = metric;
+                        memcpy(best_phys, iface, ilen + 1);
+                    }
+                    if (metric < best_any_metric) {
+                        best_any_metric = metric;
+                        memcpy(best_any, iface, ilen + 1);
+                    }
                 }
             }
         }
-        p = strchr(p, '\n');
+        p = eol;
     }
     if (best_phys[0]) { g_strlcpy(out, best_phys, len); return TRUE; }
     if (best_any[0])  { g_strlcpy(out, best_any, len);  return TRUE; }
@@ -154,7 +187,8 @@ static void read_net(SysMon *m, gboolean refresh_route) {
     gboolean filter_one = FALSE;
 
     if (!m->net_iface || strcmp(m->net_iface, "auto") == 0) {
-        if (refresh_route || m->cached_auto_iface[0] == '\0') {
+        if (refresh_route || !m->auto_iface_checked) {
+            m->auto_iface_checked = TRUE;
             if (!metrics_active_iface(m, m->cached_auto_iface, sizeof(m->cached_auto_iface)))
                 m->cached_auto_iface[0] = '\0';
         }
@@ -167,28 +201,38 @@ static void read_net(SysMon *m, gboolean refresh_route) {
         filter_one = TRUE;
     }
 
-    char buf[4096];
-    if (pread_all(m->fd_net_dev, buf, sizeof(buf)) <= 0) return;
+    if (pread_all(m->fd_net_dev, m->io_buf, sizeof(m->io_buf)) <= 0) return;
 
     unsigned long long rx = 0, tx = 0;
-    char *p = strchr(buf, '\n');
+    char *p = strchr(m->io_buf, '\n');
     if (p) p = strchr(p + 1, '\n');
     while (p && *++p) {
         char *eol = strchr(p, '\n');
-        if (eol) *eol = '\0';
         char *colon = strchr(p, ':');
-        if (colon) {
-            *colon = '\0';
-            char *name = g_strstrip(p);
-            gboolean match = filter_one ? (strcmp(name, want) == 0) : (strcmp(name, "lo") != 0);
-            if (match) {
-                unsigned long long r_bytes = 0, t_bytes = 0;
-                if (sscanf(colon + 1, "%llu %*u %*u %*u %*u %*u %*u %*u %llu",
-                           &r_bytes, &t_bytes) == 2) {
+        if (colon && (!eol || colon < eol)) {
+            const char *ns = skip_ws(p);
+            const char *ne = colon;
+            while (ne > ns && (ne[-1] == ' ' || ne[-1] == '\t')) ne--;
+            size_t nlen = (size_t)(ne - ns);
+            if (nlen > 0 && nlen < 64) {
+                char name[64];
+                memcpy(name, ns, nlen);
+                name[nlen] = '\0';
+
+                gboolean match = filter_one ? (strcmp(name, want) == 0) : (strcmp(name, "lo") != 0);
+                if (match) {
+                    const char *q = skip_ws(colon + 1);
+                    char *end = NULL;
+                    unsigned long long r_bytes = strtoull(q, &end, 10);
+                    q = end;
+                    for (int col = 1; col < 8; col++)
+                        q = skip_tok(skip_ws(q));
+                    q = skip_ws(q);
+                    unsigned long long t_bytes = strtoull(q, NULL, 10);
                     rx += r_bytes;
                     tx += t_bytes;
+                    if (filter_one) break;
                 }
-                if (filter_one) break;
             }
         }
         p = eol;

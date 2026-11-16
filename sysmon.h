@@ -6,6 +6,7 @@
 #include <libxfce4panel/libxfce4panel.h>
 
 #define HIST_LEN 8
+#define PROC_BUF_SIZE 16384
 
 typedef enum {
     METRIC_CPU = 0,
@@ -50,6 +51,7 @@ typedef struct {
     int pct;
     int disp_pct;
     GtkWidget *label;
+    GdkPixbuf *cached_pb;
 } MetricSlot;
 
 typedef struct {
@@ -66,6 +68,7 @@ typedef struct {
 typedef struct {
     XfcePanelPlugin *plugin;
     GtkCssProvider *css;
+    GtkWidget *prefs_dlg;
 
     /* Configuration */
     MetricSlot metrics[METRIC_COUNT];
@@ -106,6 +109,7 @@ typedef struct {
     NetSample net_hist[HIST_LEN];
     int net_hist_len;
     int net_hist_idx;
+    gboolean auto_iface_checked;
     char cached_auto_iface[64];
     char prev_iface[64];
 
@@ -113,12 +117,16 @@ typedef struct {
     char net_tx_text[24];
     char disp_net_rx[24];
     char disp_net_tx[24];
+
+    /* Reusable scratch buffer for /proc reads */
+    char io_buf[PROC_BUF_SIZE];
 } SysMon;
 
 extern const MetricMeta METRIC_META[METRIC_COUNT];
 
 /* Core lifecycle & UI (system-monitor.c) */
-void sysmon_parse_icon_spec(IconSpec *spec, const char *raw, BuiltinIcon fallback);
+void sysmon_parse_icon_spec(IconSpec *spec, const char *raw);
+void sysmon_invalidate_icons(SysMon *m);
 void sysmon_apply_css(SysMon *m);
 void sysmon_rebuild_ui(SysMon *m);
 void sysmon_restart_timer(SysMon *m);

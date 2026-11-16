@@ -44,7 +44,7 @@ static void on_prefs_changed(GtkWidget *w, gpointer user_data) {
         m->metrics[i].enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ui->cb_metric[i]));
         if (ui->entry_icon[i]) {
             const char *txt = gtk_entry_get_text(GTK_ENTRY(ui->entry_icon[i]));
-            sysmon_parse_icon_spec(&m->metrics[i].icon, txt, (BuiltinIcon)i);
+            sysmon_parse_icon_spec(&m->metrics[i].icon, txt);
         }
         if (ui->col_metric[i]) {
             g_free(m->metrics[i].color);
@@ -67,6 +67,7 @@ static void on_prefs_changed(GtkWidget *w, gpointer user_data) {
             g_free(m->net_iface);
             m->net_iface = g_steal_pointer(&new_if);
             m->cached_auto_iface[0] = '\0';
+            m->auto_iface_checked = FALSE;
             m->net_hist_len = 0;
             m->net_hist_idx = 0;
         }
@@ -88,6 +89,7 @@ static void on_prefs_changed(GtkWidget *w, gpointer user_data) {
     g_free(m->dot_color);    m->dot_color    = get_color_btn_hex(GTK_COLOR_BUTTON(ui->col_dot));
 
     m->tick = 0;
+    sysmon_invalidate_icons(m);
     sysmon_apply_css(m);
     sysmon_rebuild_ui(m);
     metrics_update(m);
@@ -158,12 +160,14 @@ static void on_reset_icons_clicked(GtkButton *b, gpointer user_data) {
     }
 }
 
-static void on_prefs_response(GtkDialog *dlg, gint resp, gpointer user_data) {
-    (void)resp;
+static void on_prefs_destroy(GtkWidget *dlg, gpointer user_data) {
+    (void)dlg;
     PrefsUI *ui = user_data;
-    sysmon_flush_save(ui->m);
-    xfce_panel_plugin_unblock_menu(ui->m->plugin);
-    gtk_widget_destroy(GTK_WIDGET(dlg));
+    if (ui->m) {
+        ui->m->prefs_dlg = NULL;
+        sysmon_flush_save(ui->m);
+        xfce_panel_plugin_unblock_menu(ui->m->plugin);
+    }
     g_free(ui);
 }
 
@@ -177,6 +181,10 @@ static GtkWidget *new_grid(void) {
 
 void prefs_open_dialog(XfcePanelPlugin *plugin, gpointer user_data) {
     SysMon *m = user_data;
+    if (m->prefs_dlg) {
+        gtk_window_present(GTK_WINDOW(m->prefs_dlg));
+        return;
+    }
     xfce_panel_plugin_block_menu(plugin);
 
     GtkWidget *dlg = xfce_titled_dialog_new_with_mixed_buttons(
@@ -186,6 +194,7 @@ void prefs_open_dialog(XfcePanelPlugin *plugin, gpointer user_data) {
         "window-close-symbolic", "_Close", GTK_RESPONSE_OK,
         NULL);
     gtk_window_set_default_size(GTK_WINDOW(dlg), 420, -1);
+    m->prefs_dlg = dlg;
 
     PrefsUI *ui = g_new0(PrefsUI, 1);
     ui->m = m;
@@ -291,6 +300,7 @@ void prefs_open_dialog(XfcePanelPlugin *plugin, gpointer user_data) {
 
     gtk_notebook_append_page(GTK_NOTEBOOK(nb), g3, gtk_label_new("Colors"));
 
-    g_signal_connect(dlg, "response", G_CALLBACK(on_prefs_response), ui);
+    g_signal_connect(dlg, "response", G_CALLBACK(gtk_widget_destroy), NULL);
+    g_signal_connect(dlg, "destroy", G_CALLBACK(on_prefs_destroy), ui);
     gtk_widget_show_all(dlg);
 }

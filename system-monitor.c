@@ -25,24 +25,24 @@ static const char *const BUILTIN_SVGS[] = {
         "</svg>",
 };
 
-void sysmon_parse_icon_spec(IconSpec *spec, const char *raw, BuiltinIcon fallback) {
-    (void)fallback;
+void sysmon_parse_icon_spec(IconSpec *spec, const char *raw) {
     const char *s = raw ? raw : "";
     if (g_strcmp0(s, "xsi-cpu-symbolic") == 0) s = "builtin-cpu";
     if (g_strcmp0(s, "xsi-ram-symbolic") == 0 || g_strcmp0(s, "media-flash-symbolic") == 0) s = "builtin-ram";
 
+    gchar *copy = g_strdup(s);
     g_free(spec->name);
-    spec->name = g_strdup(s);
+    spec->name = copy;
 
-    if (*s == '\0') {
+    if (*copy == '\0') {
         spec->kind = ICON_NONE;
-    } else if (strcmp(s, "builtin-cpu") == 0) {
+    } else if (strcmp(copy, "builtin-cpu") == 0) {
         spec->kind = ICON_BUILTIN;
         spec->builtin = BUILTIN_CPU;
-    } else if (strcmp(s, "builtin-ram") == 0) {
+    } else if (strcmp(copy, "builtin-ram") == 0) {
         spec->kind = ICON_BUILTIN;
         spec->builtin = BUILTIN_RAM;
-    } else if (strcmp(s, "builtin-disk") == 0) {
+    } else if (strcmp(copy, "builtin-disk") == 0) {
         spec->kind = ICON_BUILTIN;
         spec->builtin = BUILTIN_DISK;
     } else {
@@ -50,12 +50,17 @@ void sysmon_parse_icon_spec(IconSpec *spec, const char *raw, BuiltinIcon fallbac
     }
 }
 
+void sysmon_invalidate_icons(SysMon *m) {
+    for (int i = 0; i < METRIC_COUNT; i++)
+        g_clear_object(&m->metrics[i].cached_pb);
+}
+
 static void load_config(SysMon *m) {
     for (int i = 0; i < METRIC_COUNT; i++) {
         m->metrics[i].enabled = TRUE;
         m->metrics[i].color = g_strdup("");
         if (METRIC_META[i].default_icon)
-            sysmon_parse_icon_spec(&m->metrics[i].icon, METRIC_META[i].default_icon, (BuiltinIcon)i);
+            sysmon_parse_icon_spec(&m->metrics[i].icon, METRIC_META[i].default_icon);
     }
     m->show_icons = TRUE;
     m->task_manager_cmd = g_strdup("xfce4-taskmanager");
@@ -78,7 +83,7 @@ static void load_config(SysMon *m) {
         m->metrics[i].enabled = xfce_rc_read_bool_entry(rc, meta->show_key, TRUE);
         if (meta->icon_key) {
             const char *val = xfce_rc_read_entry(rc, meta->icon_key, meta->default_icon);
-            sysmon_parse_icon_spec(&m->metrics[i].icon, val, (BuiltinIcon)i);
+            sysmon_parse_icon_spec(&m->metrics[i].icon, val);
         }
         if (meta->color_key) {
             g_free(m->metrics[i].color);
@@ -192,8 +197,6 @@ void sysmon_apply_css(SysMon *m) {
     g_string_free(s, TRUE);
 }
 
-
-
 static GtkWidget *make_label(const char *text, const char *c1, const char *c2) {
     GtkWidget *lbl = gtk_label_new(text);
     gtk_label_set_xalign(GTK_LABEL(lbl), 0.5f);
@@ -203,27 +206,29 @@ static GtkWidget *make_label(const char *text, const char *c1, const char *c2) {
     return lbl;
 }
 
-static GtkWidget *make_builtin_image(BuiltinIcon id, int size, const char *custom_hex, GtkStyleContext *ctx) {
-    GdkRGBA fg;
-    if (!(custom_hex && *custom_hex && gdk_rgba_parse(&fg, custom_hex)))
-        gtk_style_context_get_color(ctx, GTK_STATE_FLAG_NORMAL, &fg);
+static GtkWidget *get_builtin_image(SysMon *m, MetricSlot *slot) {
+    if (!slot->cached_pb) {
+        GdkRGBA fg;
+        if (!(slot->color && *slot->color && gdk_rgba_parse(&fg, slot->color)))
+            gtk_style_context_get_color(gtk_widget_get_style_context(m->box), GTK_STATE_FLAG_NORMAL, &fg);
 
-    char hex[8];
-    g_snprintf(hex, sizeof(hex), "#%02x%02x%02x",
-        (int)(fg.red * 255.0 + 0.5),
-        (int)(fg.green * 255.0 + 0.5),
-        (int)(fg.blue * 255.0 + 0.5));
+        char hex[8];
+        g_snprintf(hex, sizeof(hex), "#%02x%02x%02x",
+            (int)(fg.red * 255.0 + 0.5),
+            (int)(fg.green * 255.0 + 0.5),
+            (int)(fg.blue * 255.0 + 0.5));
 
-    g_autofree gchar *tinted = g_strdup(BUILTIN_SVGS[id]);
-    char *pos = strstr(tinted, "#2e3436");
-    if (pos) memcpy(pos, hex, 7);
+        g_autofree gchar *tinted = g_strdup(BUILTIN_SVGS[slot->icon.builtin]);
+        char *pos = strstr(tinted, "#2e3436");
+        if (pos) memcpy(pos, hex, 7);
 
-    g_autoptr(GInputStream) stream = g_memory_input_stream_new_from_data(tinted, -1, NULL);
-    g_autoptr(GdkPixbuf) pb = gdk_pixbuf_new_from_stream_at_scale(stream, size, size, TRUE, NULL, NULL);
-    return pb ? gtk_image_new_from_pixbuf(pb) : gtk_image_new();
+        g_autoptr(GInputStream) stream = g_memory_input_stream_new_from_data(tinted, -1, NULL);
+        slot->cached_pb = gdk_pixbuf_new_from_stream_at_scale(stream, m->icon_size, m->icon_size, TRUE, NULL, NULL);
+    }
+    return slot->cached_pb ? gtk_image_new_from_pixbuf(slot->cached_pb) : gtk_image_new();
 }
 
-static GtkWidget *make_scalar_item(SysMon *m, const MetricSlot *slot, const char *css_class) {
+static GtkWidget *make_scalar_item(SysMon *m, MetricSlot *slot, const char *css_class) {
     GtkWidget *hb = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     if (css_class)
         gtk_style_context_add_class(gtk_widget_get_style_context(hb), css_class);
@@ -231,7 +236,7 @@ static GtkWidget *make_scalar_item(SysMon *m, const MetricSlot *slot, const char
     if (m->show_icons && slot->icon.kind != ICON_NONE) {
         GtkWidget *img = NULL;
         if (slot->icon.kind == ICON_BUILTIN) {
-            img = make_builtin_image(slot->icon.builtin, m->icon_size, slot->color, gtk_widget_get_style_context(m->box));
+            img = get_builtin_image(m, slot);
         } else {
             img = gtk_image_new_from_icon_name(slot->icon.name, GTK_ICON_SIZE_MENU);
             gtk_image_set_pixel_size(GTK_IMAGE(img), m->icon_size);
@@ -294,6 +299,13 @@ void sysmon_restart_timer(SysMon *m) {
     m->timeout_id = g_timeout_add((guint)m->interval_ms, metrics_update, m);
 }
 
+static void on_style_updated(GtkWidget *w, gpointer user_data) {
+    (void)w;
+    SysMon *m = user_data;
+    sysmon_invalidate_icons(m);
+    sysmon_rebuild_ui(m);
+}
+
 static gboolean on_button_press(GtkWidget *w, GdkEventButton *ev, gpointer user_data) {
     (void)w;
     SysMon *m = user_data;
@@ -319,11 +331,21 @@ static gboolean on_query_tooltip(GtkWidget *w, gint x, gint y, gboolean kb, GtkT
     } else {
         iface = m->net_iface;
     }
+    char cpu_s[16], ram_s[16], disk_s[16];
+    if (m->metrics[METRIC_CPU].enabled)  g_snprintf(cpu_s, sizeof(cpu_s), "%d%%", m->metrics[METRIC_CPU].pct);
+    else g_strlcpy(cpu_s, "off", sizeof(cpu_s));
+    if (m->metrics[METRIC_RAM].enabled)  g_snprintf(ram_s, sizeof(ram_s), "%d%%", m->metrics[METRIC_RAM].pct);
+    else g_strlcpy(ram_s, "off", sizeof(ram_s));
+    if (m->metrics[METRIC_DISK].enabled) g_snprintf(disk_s, sizeof(disk_s), "%d%%", m->metrics[METRIC_DISK].pct);
+    else g_strlcpy(disk_s, "off", sizeof(disk_s));
+
     g_autofree gchar *txt = g_strdup_printf(
-        "CPU: %d%%  |  RAM: %d%%\nNet (%s): %s  %s\nDisk (%s): %d%%",
-        m->metrics[METRIC_CPU].pct, m->metrics[METRIC_RAM].pct,
-        iface, m->net_rx_text, m->net_tx_text,
-        m->disk_path, m->metrics[METRIC_DISK].pct);
+        "CPU: %s  |  RAM: %s\nNet (%s): %s  %s\nDisk (%s): %s",
+        cpu_s, ram_s,
+        iface,
+        m->metrics[METRIC_NET].enabled ? m->net_rx_text : "off",
+        m->metrics[METRIC_NET].enabled ? m->net_tx_text : "",
+        m->disk_path, disk_s);
     gtk_tooltip_set_text(tip, txt);
     return TRUE;
 }
@@ -340,12 +362,18 @@ static gboolean on_size_changed(XfcePanelPlugin *plugin, gint size, gpointer use
 static void on_free_data(XfcePanelPlugin *plugin, gpointer user_data) {
     (void)plugin;
     SysMon *m = user_data;
+    if (m->prefs_dlg) gtk_widget_destroy(m->prefs_dlg);
     if (m->timeout_id) g_source_remove(m->timeout_id);
     sysmon_flush_save(m);
     metrics_close_fds(m);
-    if (m->css) g_object_unref(m->css);
+    if (m->css) {
+        gtk_style_context_remove_provider_for_screen(
+            gdk_screen_get_default(), GTK_STYLE_PROVIDER(m->css));
+        g_object_unref(m->css);
+    }
 
     for (int i = 0; i < METRIC_COUNT; i++) {
+        g_clear_object(&m->metrics[i].cached_pb);
         g_free(m->metrics[i].icon.name);
         g_free(m->metrics[i].color);
     }
@@ -379,6 +407,7 @@ static void sysmon_construct(XfcePanelPlugin *plugin) {
 
     xfce_panel_plugin_menu_show_configure(plugin);
     g_signal_connect(plugin, "configure-plugin", G_CALLBACK(prefs_open_dialog), m);
+    g_signal_connect(m->box, "style-updated", G_CALLBACK(on_style_updated), m);
     g_signal_connect(m->event_box, "button-press-event", G_CALLBACK(on_button_press), m);
     g_signal_connect(m->event_box, "query-tooltip", G_CALLBACK(on_query_tooltip), m);
     g_signal_connect(plugin, "size-changed", G_CALLBACK(on_size_changed), m);
