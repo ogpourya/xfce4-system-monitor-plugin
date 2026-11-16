@@ -1,31 +1,45 @@
+<div align="center">
+
 # xfce4-system-monitor-plugin
 
-Lightweight single-row XFCE 4 panel plugin showing **CPU**, **RAM**, **Network** (`▼` / `▲`), and **Disk** usage.
+Minimal single-row XFCE 4 panel monitor for **CPU**, **RAM**, **Network**, and **Disk**.
 
-## Features
+<br>
 
-- **Click to launch task manager**: Left-click the widget to open `xfce4-taskmanager` (configurable in Properties).
-- **Low-overhead polling**: Pre-opened `/proc` file descriptors with `pread()` and dirty-checked GTK label updates (`250 ms` default interval).
-- **Theme-tinted symbolic icons**: Built-in crisp `16x16` symbolic SVGs automatically tinted to your panel foreground color, or any GTK icon name.
-- **Live preferences**: Right-click → **Properties** to toggle metrics, pick network interface (`auto`, `all`, or specific NIC), set mount path, adjust update interval (`100–10000 ms`), font/icon sizes, and custom colors.
+<img src="screenshots/panel.png" alt="Panel Preview" width="800">
 
-## Dependencies
+</div>
 
-- `gtk3` (`gtk+-3.0`)
-- `xfce4-panel` (`libxfce4panel-2.0`)
-- `libxfce4ui` (`libxfce4ui-2`)
-- `libxfce4util` (`libxfce4util-1.0`)
+---
 
-## Build & Install
+## Highlights
+
+- **Zero-jitter layout** — Tabular numerals and symmetric spacing keep neighboring panel items locked in place.
+- **250 ms real-time polling** — Pre-opened `/proc` file descriptors with a 1-second sliding window prevent network bursts from flickering.
+- **Click to inspect** — Left-click launches `xfce4-taskmanager` (configurable); hover shows active interface and mount details.
+- **Theme-tinted icons** — Crisp `16x16` symbolic SVGs adapt automatically to light and dark panels.
+- **Live preferences** — Right-click → **Properties** to toggle metrics, pick NIC (`auto`, `all`, or device), set mount path, colors, and sizes.
+
+## Settings
+
+| General | Icons & Size | Colors |
+|:---:|:---:|:---:|
+| <img src="screenshots/Screenshot_1.png" alt="General Settings" width="260"> | <img src="screenshots/Screenshot_2.png" alt="Icons and Size" width="260"> | <img src="screenshots/Screenshot_3.png" alt="Colors" width="260"> |
+
+## Install
+
+Requires `gtk3`, `xfce4-panel`, `libxfce4ui`, and `libxfce4util`.
 
 ```bash
+git clone https://github.com/ogpourya/xfce4-system-monitor-plugin.git
+cd xfce4-system-monitor-plugin
 make
 sudo make install
 xfce4-panel -r
 ```
 
-Then right-click your XFCE panel → **Panel** → **Add New Items...** → **System Monitor**.
+Right-click the panel → **Panel** → **Add New Items...** → **System Monitor**.
 
 ## License
 
-MIT
+[MIT](LICENSE)
