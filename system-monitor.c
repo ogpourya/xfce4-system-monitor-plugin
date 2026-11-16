@@ -302,6 +302,15 @@ void sysmon_restart_timer(SysMon *m) {
 static void on_style_updated(GtkWidget *w, gpointer user_data) {
     (void)w;
     SysMon *m = user_data;
+    gboolean has_custom_builtin = FALSE;
+    for (int i = 0; i < METRIC_COUNT; i++) {
+        if (m->metrics[i].enabled && m->metrics[i].icon.kind == ICON_BUILTIN &&
+            !(m->metrics[i].color && *m->metrics[i].color)) {
+            has_custom_builtin = TRUE;
+            break;
+        }
+    }
+    if (!has_custom_builtin) return;
     sysmon_invalidate_icons(m);
     sysmon_rebuild_ui(m);
 }
@@ -407,7 +416,7 @@ static void sysmon_construct(XfcePanelPlugin *plugin) {
 
     xfce_panel_plugin_menu_show_configure(plugin);
     g_signal_connect(plugin, "configure-plugin", G_CALLBACK(prefs_open_dialog), m);
-    g_signal_connect(m->box, "style-updated", G_CALLBACK(on_style_updated), m);
+    g_signal_connect(plugin, "style-updated", G_CALLBACK(on_style_updated), m);
     g_signal_connect(m->event_box, "button-press-event", G_CALLBACK(on_button_press), m);
     g_signal_connect(m->event_box, "query-tooltip", G_CALLBACK(on_query_tooltip), m);
     g_signal_connect(plugin, "size-changed", G_CALLBACK(on_size_changed), m);

@@ -204,11 +204,11 @@ static void read_net(SysMon *m, gboolean refresh_route) {
     if (pread_all(m->fd_net_dev, m->io_buf, sizeof(m->io_buf)) <= 0) return;
 
     unsigned long long rx = 0, tx = 0;
-    char *p = strchr(m->io_buf, '\n');
+    const char *p = strchr(m->io_buf, '\n');
     if (p) p = strchr(p + 1, '\n');
     while (p && *++p) {
-        char *eol = strchr(p, '\n');
-        char *colon = strchr(p, ':');
+        const char *eol = strchr(p, '\n');
+        const char *colon = strchr(p, ':');
         if (colon && (!eol || colon < eol)) {
             const char *ns = skip_ws(p);
             const char *ne = colon;
